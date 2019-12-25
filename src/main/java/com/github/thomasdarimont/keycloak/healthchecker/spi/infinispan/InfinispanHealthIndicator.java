@@ -65,10 +65,8 @@ public class InfinispanHealthIndicator extends AbstractHealthIndicator {
         switch (clusterHealth.getHealthStatus()) {
             case HEALTHY:
                 return reportUp();
-            case REBALANCING:
-                return reportUp();
-            case UNHEALTHY:
-                return reportDown();
+//            case REBALANCING:
+//               return reportUp();
             default:
                 return reportDown();
         }
