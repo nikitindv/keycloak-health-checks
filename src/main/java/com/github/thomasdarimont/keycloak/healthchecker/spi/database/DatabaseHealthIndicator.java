@@ -20,7 +20,7 @@ class DatabaseHealthIndicator extends AbstractHealthIndicator {
         super("database");
         this.session = session;
         this.jndiName = config.get("jndiName", "java:jboss/datasources/KeycloakDS");
-        this.healthQuery = config.get("query", "SELECT 1");
+        this.healthQuery = "select case WHEN VARIABLE_VALUE = 'ON' then 1 else (select table_name from information_schema.tables) end   from information_schema.GLOBAL_STATUS  where VARIABLE_NAME = 'wsrep_ready'";
     }
 
     @Override

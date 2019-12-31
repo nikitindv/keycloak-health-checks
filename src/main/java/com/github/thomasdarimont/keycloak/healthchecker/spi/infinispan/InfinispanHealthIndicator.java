@@ -3,72 +3,67 @@ package com.github.thomasdarimont.keycloak.healthchecker.spi.infinispan;
 import com.github.thomasdarimont.keycloak.healthchecker.model.HealthStatus;
 import com.github.thomasdarimont.keycloak.healthchecker.model.KeycloakHealthStatus;
 import com.github.thomasdarimont.keycloak.healthchecker.spi.AbstractHealthIndicator;
-import lombok.extern.jbosslog.JBossLog;
 import org.infinispan.health.ClusterHealth;
 import org.infinispan.health.Health;
 import org.infinispan.manager.EmbeddedCacheManager;
 import org.keycloak.Config;
+import org.keycloak.models.KeycloakSession;
 
 import javax.naming.InitialContext;
 import javax.naming.NamingException;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
-@JBossLog
+
 public class InfinispanHealthIndicator extends AbstractHealthIndicator {
+
+    private final KeycloakSession session;
 
     private static final String KEYCLOAK_CACHE_MANAGER_JNDI_NAME = "java:jboss/infinispan/container/keycloak";
 
-    InfinispanHealthIndicator(Config.Scope config) {
+    InfinispanHealthIndicator(KeycloakSession session, Config.Scope config) {
         super("infinispan");
+        this.session = session;
     }
 
     @Override
     public HealthStatus check() {
 
-        Health infinispanHealth = lookupCacheManager().getHealth();
-        ClusterHealth clusterHealth = infinispanHealth.getClusterHealth();
+        try {
 
-        KeycloakHealthStatus status = determineClusterHealth(clusterHealth);
+            String host = this.session.getContext().getUri().getRequestUri().getHost();
+            String hostHealthKey = "__health_check" + host;
+            Health infinispanHealth = lookupCacheManager().getHealth();
+            ClusterHealth clusterHealth = infinispanHealth.getClusterHealth();
 
-        List<Map<Object, Object>> detailedCacheHealthInfo = infinispanHealth.getCacheHealth().stream().map(c -> {
-            Map<Object, Object> item = new LinkedHashMap<>();
-            item.put("cacheName", c.getCacheName());
-            item.put("healthStatus", c.getStatus());
-            return item;
-        }).collect(Collectors.toList());
+            KeycloakHealthStatus status = determineClusterHealth(clusterHealth);
 
-        status//
-                .withAttribute("clusterName", clusterHealth.getClusterName()) //
-                .withAttribute("healthStatus", clusterHealth.getHealthStatus()) //
-                .withAttribute("numberOfNodes", clusterHealth.getNumberOfNodes()) //
-                .withAttribute("nodeNames", clusterHealth.getNodeNames())
-                .withAttribute("cacheDetails", detailedCacheHealthInfo)
-        ;
+            status//
+                    .withAttribute("clusterName", clusterHealth.getClusterName()) //
+                    .withAttribute("healthStatus", clusterHealth.getHealthStatus()) //
+                    .withAttribute("numberOfNodes", clusterHealth.getNumberOfNodes())
+                    .withAttribute("host", host);
 
-        return status;
+            lookupCacheManager().getCache("work").put(hostHealthKey, 1);
+            lookupCacheManager().getCache("work").get(hostHealthKey);
+
+            return status;
+        } catch (Exception ex) {
+            return reportDown();
+        }
     }
 
     private EmbeddedCacheManager lookupCacheManager() {
         try {
             return (EmbeddedCacheManager) new InitialContext().lookup(KEYCLOAK_CACHE_MANAGER_JNDI_NAME);
         } catch (NamingException e) {
-            log.warnv("Could not find EmbeddedCacheManager with name: {0}", KEYCLOAK_CACHE_MANAGER_JNDI_NAME);
             throw new RuntimeException(e);
         }
     }
 
     private KeycloakHealthStatus determineClusterHealth(ClusterHealth clusterHealth) {
 
-        switch (clusterHealth.getHealthStatus()) {
-            case HEALTHY:
-                return reportUp();
-//            case REBALANCING:
-//               return reportUp();
-            default:
-                return reportDown();
+        if (clusterHealth.getHealthStatus() == org.infinispan.health.HealthStatus.HEALTHY) {
+            return reportUp();
         }
+        return reportDown();
     }
 }
